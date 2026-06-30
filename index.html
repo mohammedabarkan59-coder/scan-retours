@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0c1012">
+<title>Scan Retours</title>
+<style>
+  :root{
+    --bg:#0c1012;
+    --panel:#151b1e;
+    --panel-2:#1d2629;
+    --line:#2a363a;
+    --ink:#eef4f3;
+    --muted:#8da3a6;
+    --scan:#7CFF5B;        /* vert scan : capture OK */
+    --warn:#FFB300;        /* ambre : image floue */
+    --bad:#FF5252;
+    --mono:'SFMono-Regular',ui-monospace,'Roboto Mono','DejaVu Sans Mono',monospace;
+    --disp:'Archivo','Arial Narrow',system-ui,sans-serif;
+    --body:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg);color:var(--ink);font-family:var(--body);
+    overscroll-behavior:none;
+    padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  /* ---------- Header ---------- */
+  header{
+    display:flex;align-items:center;gap:.6rem;
+    padding:.7rem .9rem;border-bottom:1px solid var(--line);
+    background:var(--panel);position:sticky;top:0;z-index:30;
+  }
+  .logo{
+    width:32px;height:32px;border-radius:7px;flex:none;
+    background:linear-gradient(135deg,var(--scan),#2fae5e);
+    display:grid;place-items:center;color:#04250f;font-weight:800;font-size:1.05rem;
+  }
+  header h1{
+    font-family:var(--disp);font-size:1.02rem;font-weight:800;letter-spacing:.06em;
+    text-transform:uppercase;margin:0;line-height:1;
+  }
+  header .sub{font-size:.66rem;color:var(--muted);letter-spacing:.18em;text-transform:uppercase}
+  .count{
+    margin-left:auto;font-family:var(--mono);font-size:.78rem;color:var(--scan);
+    background:#0f1d14;border:1px solid #214a2d;border-radius:999px;padding:.28rem .65rem;
+  }
+  /* ---------- Tabs ---------- */
+  .tabs{display:flex;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:49px;z-index:29}
+  .tab{
+    flex:1;padding:.7rem;background:none;border:none;color:var(--muted);
+    font-family:var(--disp);font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+    font-size:.72rem;border-bottom:2px solid transparent;cursor:pointer;
+  }
+  .tab.active{color:var(--ink);border-bottom-color:var(--scan)}
+
+  main{padding:0}
+  .view{display:none}
+  .view.active{display:block}
+
+  /* ---------- Scanner ---------- */
+  .cam-wrap{position:relative;width:100%;aspect-ratio:3/4;background:#000;overflow:hidden}
+  video{width:100%;height:100%;object-fit:cover;display:block}
+  .reticle{
+    position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;
+  }
+  .frame{
+    width:74%;aspect-ratio:1.25/1;border-radius:14px;position:relative;
+    box-shadow:0 0 0 100vmax rgba(0,0,0,.42);
+    transition:box-shadow .15s;
+  }
+  .corner{position:absolute;width:30px;height:30px;border:3px solid var(--scan);transition:border-color .15s}
+  .corner.tl{top:-2px;left:-2px;border-right:none;border-bottom:none;border-top-left-radius:14px}
+  .corner.tr{top:-2px;right:-2px;border-left:none;border-bottom:none;border-top-right-radius:14px}
+  .corner.bl{bottom:-2px;left:-2px;border-right:none;border-top:none;border-bottom-left-radius:14px}
+  .corner.br{bottom:-2px;right:-2px;border-left:none;border-top:none;border-bottom-right-radius:14px}
+  .scanline{
+    position:absolute;left:6%;right:6%;height:2px;top:8%;
+    background:linear-gradient(90deg,transparent,var(--scan),transparent);
+    animation:sweep 2.4s ease-in-out infinite;opacity:.9;
+  }
+  @keyframes sweep{0%,100%{top:8%}50%{top:90%}}
+  @media (prefers-reduced-motion:reduce){.scanline{animation:none;top:50%}}
+
+  /* state colours on the frame */
+  .cam-wrap.blurry .corner{border-color:var(--warn)}
+  .cam-wrap.blurry .scanline{background:linear-gradient(90deg,transparent,var(--warn),transparent)}
+  .cam-wrap.hit .frame{box-shadow:0 0 0 100vmax rgba(20,80,30,.35)}
+
+  /* status banner over camera */
+  .status{
+    position:absolute;left:0;right:0;bottom:0;padding:.7rem .9rem 1rem;
+    background:linear-gradient(0deg,rgba(0,0,0,.78),transparent);
+    display:flex;align-items:center;gap:.7rem;
+  }
+  .dot{width:12px;height:12px;border-radius:50%;background:var(--muted);flex:none;box-shadow:0 0 0 4px rgba(255,255,255,.06)}
+  .dot.ok{background:var(--scan)}
+  .dot.warn{background:var(--warn)}
+  .dot.bad{background:var(--bad)}
+  .status .msg{font-size:.86rem;font-weight:600}
+  .status .msg small{display:block;color:#cfd9d9;font-weight:400;font-size:.72rem;margin-top:.1rem}
+
+  /* sharpness meter */
+  .sharp{
+    position:absolute;top:.8rem;left:.8rem;right:.8rem;display:flex;align-items:center;gap:.5rem;
+    background:rgba(0,0,0,.45);border-radius:999px;padding:.32rem .6rem;backdrop-filter:blur(4px);
+  }
+  .sharp .lbl{font-family:var(--disp);font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:#cfd9d9}
+  .bar{flex:1;height:6px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden}
+  .bar > i{display:block;height:100%;width:0;background:var(--warn);transition:width .15s,background .15s}
+  .sharp .pct{font-family:var(--mono);font-size:.7rem;color:#cfd9d9;min-width:2.6em;text-align:right}
+
+  /* capture flash */
+  .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+  .flash.go{animation:fl .4s ease-out}
+  @keyframes fl{0%{opacity:.85}100%{opacity:0}}
+
+  /* controls */
+  .controls{display:flex;gap:.6rem;padding:.8rem .9rem;flex-wrap:wrap}
+  button.act{
+    flex:1;min-width:130px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
+    padding:.85rem;border-radius:11px;font-weight:700;font-size:.92rem;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:.5rem;
+  }
+  button.act:active{transform:scale(.98)}
+  button.act.primary{background:var(--scan);color:#04250f;border-color:var(--scan)}
+  button.act.ghost{background:transparent}
+  button.act:disabled{opacity:.45}
+
+  /* settings strip */
+  .settings{padding:0 .9rem 1rem}
+  .opt{
+    display:flex;align-items:center;gap:.7rem;padding:.7rem 0;border-top:1px solid var(--line);
+  }
+  .opt .name{font-size:.86rem}
+  .opt .name small{display:block;color:var(--muted);font-size:.7rem;margin-top:.12rem}
+  .opt input[type=range]{margin-left:auto;width:42%}
+  .switch{margin-left:auto;width:48px;height:28px;border-radius:999px;background:var(--line);position:relative;flex:none;cursor:pointer;transition:background .15s}
+  .switch.on{background:var(--scan)}
+  .switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:50%;background:#fff;transition:left .15s}
+  .switch.on::after{left:23px}
+  .thr-val{font-family:var(--mono);color:var(--scan);font-size:.8rem;min-width:2.4em;text-align:right}
+
+  /* ---------- Journal (list) ---------- */
+  .toolbar{display:flex;gap:.5rem;padding:.8rem .9rem;flex-wrap:wrap}
+  .toolbar button{
+    border:1px solid var(--line);background:var(--panel-2);color:var(--ink);
+    padding:.6rem .8rem;border-radius:9px;font-size:.8rem;font-weight:600;cursor:pointer;flex:1;min-width:110px;
+  }
+  .toolbar button.danger{color:var(--bad);border-color:#4a2424}
+  .search{padding:0 .9rem .4rem}
+  .search input{
+    width:100%;padding:.7rem .9rem;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--ink);font-size:.9rem;font-family:var(--mono);
+  }
+  ul.log{list-style:none;margin:0;padding:.3rem .9rem 2rem}
+  li.entry{
+    display:flex;gap:.8rem;align-items:center;background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:.6rem;margin-bottom:.6rem;
+  }
+  li.entry img{width:62px;height:62px;border-radius:9px;object-fit:cover;flex:none;background:#000}
+  .meta{flex:1;min-width:0}
+  .meta .code{font-family:var(--mono);font-size:.92rem;font-weight:600;word-break:break-all;line-height:1.2}
+  .meta .fmt{display:inline-block;font-size:.6rem;letter-spacing:.08em;text-transform:uppercase;color:var(--scan);background:#0f1d14;border:1px solid #214a2d;border-radius:5px;padding:.05rem .35rem;margin-top:.3rem}
+  .meta .when{font-size:.74rem;color:var(--muted);margin-top:.28rem;font-family:var(--mono)}
+  .row-actions{display:flex;flex-direction:column;gap:.4rem;flex:none}
+  .iconbtn{width:38px;height:38px;border-radius:9px;border:1px solid var(--line);background:var(--panel-2);color:var(--ink);font-size:1rem;cursor:pointer;display:grid;place-items:center}
+  .iconbtn.del{color:var(--bad);border-color:#3a2020}
+
+  .empty{padding:3rem 1.4rem;text-align:center;color:var(--muted)}
+  .empty .big{font-size:2.4rem;margin-bottom:.6rem;opacity:.5}
+  .empty h3{font-family:var(--disp);text-transform:uppercase;letter-spacing:.1em;color:var(--ink);font-size:1rem;margin:.2rem 0 .4rem}
+
+  .toast{
+    position:fixed;left:50%;bottom:calc(1.2rem + env(safe-area-inset-bottom));transform:translateX(-50%);
+    background:#04250f;color:var(--scan);border:1px solid #2fae5e;padding:.7rem 1.1rem;border-radius:999px;
+    font-weight:700;font-size:.85rem;z-index:60;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+    max-width:90vw;text-align:center;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+  .toast.warn{background:#2a1f00;color:var(--warn);border-color:#7a5b00}
+
+  .hint{padding:.7rem .9rem;color:var(--muted);font-size:.74rem;line-height:1.5;border-top:1px solid var(--line)}
+
+  /* ---------- Sélecteur d'agence ---------- */
+  .agency-bar{background:var(--panel);border-bottom:1px solid var(--line);padding:.6rem .9rem}
+  .agency-bar .lbl{font-family:var(--disp);font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin-bottom:.45rem}
+  .chips{display:flex;gap:.45rem;flex-wrap:wrap}
+  .chip{
+    flex:1 1 40%;min-width:120px;text-align:center;padding:.6rem .5rem;border-radius:10px;
+    border:1px solid var(--line);background:var(--panel-2);color:var(--muted);
+    font-weight:700;font-size:.86rem;cursor:pointer;transition:.12s;
+  }
+  .chip.active{background:var(--scan);color:#04250f;border-color:var(--scan)}
+  .chip:active{transform:scale(.98)}
+  .filterbar{display:flex;gap:.5rem;padding:0 .9rem .4rem}
+  .filterbar select{
+    flex:none;max-width:48%;padding:.7rem .8rem;border-radius:10px;border:1px solid var(--line);
+    background:var(--panel-2);color:var(--ink);font-size:.85rem;font-weight:600;
+  }
+  .filterbar .search{flex:1;padding:0}
+  .meta .ag{display:inline-block;font-size:.62rem;letter-spacing:.04em;color:#bfe8ff;background:#0e2530;border:1px solid #1d4860;border-radius:5px;padding:.05rem .4rem;margin-top:.3rem;margin-left:.3rem}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">↺</div>
+  <div>
+    <h1>Scan Retours</h1>
+    <div class="sub">colis · code-barres · horodatage</div>
+  </div>
+  <div class="count" id="count">0</div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-view="scan">Scanner</button>
+  <button class="tab" data-view="log">Journal</button>
+</nav>
+
+<main>
+  <!-- ============ SCANNER ============ -->
+  <section class="view active" id="view-scan">
+    <div class="agency-bar">
+      <div class="lbl">Agence du colis</div>
+      <div class="chips" id="agencyChips"></div>
+    </div>
+    <div class="cam-wrap" id="camWrap">
+      <video id="video" playsinline muted autoplay></video>
+      <div class="sharp">
+        <span class="lbl">Netteté</span>
+        <div class="bar"><i id="sharpBar"></i></div>
+        <span class="pct" id="sharpPct">—</span>
+      </div>
+      <div class="reticle">
+        <div class="frame">
+          <span class="corner tl"></span><span class="corner tr"></span>
+          <span class="corner bl"></span><span class="corner br"></span>
+          <div class="scanline"></div>
+        </div>
+      </div>
+      <div class="flash" id="flash"></div>
+      <div class="status">
+        <span class="dot" id="dot"></span>
+        <div class="msg" id="statusMsg">Démarrage de la caméra…<small id="statusSub">Autorise l'accès à la caméra</small></div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="act primary" id="startBtn">▶︎ Démarrer le scan</button>
+      <button class="act ghost" id="switchBtn">⟲ Changer de caméra</button>
+    </div>
+
+    <div class="settings">
+      <div class="opt">
+        <div class="name">Seuil de netteté
+          <small>Plus haut = exige une photo plus nette avant de capturer</small>
+        </div>
+        <span class="thr-val" id="thrVal">80</span>
+      </div>
+      <input type="range" id="thr" min="20" max="220" value="80" style="width:100%;accent-color:var(--scan)">
+      <div class="opt">
+        <div class="name">Capture auto<small>Photographie le colis dès que le code est lu &amp; net</small></div>
+        <div class="switch on" id="swAuto" role="switch" aria-checked="true"></div>
+      </div>
+      <div class="opt">
+        <div class="name">Bip + vibration<small>Confirmation à chaque capture réussie</small></div>
+        <div class="switch on" id="swSound" role="switch" aria-checked="true"></div>
+      </div>
+      <div class="opt">
+        <div class="name">Téléchargement auto<small>Enregistre l'image dans tes téléchargements après capture</small></div>
+        <div class="switch" id="swSave" role="switch" aria-checked="false"></div>
+      </div>
+    </div>
+
+    <div class="hint">
+      Vise l'étiquette : le cadre passe au <b style="color:var(--scan)">vert</b> et déclenche la photo quand le code est lu et l'image nette.
+      S'il reste <b style="color:var(--warn)">ambre</b>, c'est flou — stabilise le téléphone ou rapproche-toi.
+    </div>
+  </section>
+
+  <!-- ============ JOURNAL ============ -->
+  <section class="view" id="view-log">
+    <div class="toolbar">
+      <button id="exportCsv">⤓ Exporter CSV</button>
+      <button id="exportZip">⤓ Télécharger photos</button>
+      <button id="clearAll" class="danger">🗑 Tout effacer</button>
+    </div>
+    <div class="filterbar">
+      <select id="agencyFilter"></select>
+      <div class="search" style="border:none"><input id="search" placeholder="Rechercher un code…" inputmode="search"></div>
+    </div>
+    <ul class="log" id="log"></ul>
+    <div class="empty" id="empty">
+      <div class="big">⊟</div>
+      <h3>Aucun colis scanné</h3>
+      <p>Va dans l'onglet Scanner et vise une étiquette.<br>Chaque code lu apparaît ici avec sa photo et l'heure.</p>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<!-- ZXing : lecture multi-formats (QR, Code128, EAN, DataMatrix…) -->
+<script src="https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js"></script>
+<!-- JSZip : export des photos en .zip -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+"use strict";
+
+/* =======================================================================
+   👉 TES 4 AGENCES — modifie simplement les noms entre guillemets ci-dessous.
+   ======================================================================= */
+const AGENCES = ["Valenciennes", "Saint Etienne", "Grenoble", "Toulouse"];
+
+/* ---------------- État & réglages ---------------- */
+const S = {
+  scanning:false,
+  threshold:80,
+  auto:true,
+  sound:true,
+  autosave:false,
+  agence:null,          // agence sélectionnée pour le scan en cours
+  recent:new Map(),     // code -> timestamp (anti-doublon)
+  dedupMs:6000,
+  devices:[],
+  deviceIdx:0,
+  currentStream:null,
+};
+
+/* ---------------- DOM ---------------- */
+const $ = id => document.getElementById(id);
+const video=$('video'), camWrap=$('camWrap'), dot=$('dot'),
+      statusMsg=$('statusMsg'), statusSub=$('statusSub'),
+      sharpBar=$('sharpBar'), sharpPct=$('sharpPct'),
+      flash=$('flash'), countEl=$('count'), logEl=$('log'),
+      emptyEl=$('empty'), toastEl=$('toast');
+
+function setStatus(text, sub, cls){
+  if(statusMsg.childNodes[0]) statusMsg.childNodes[0].nodeValue=text;
+  else statusMsg.insertBefore(document.createTextNode(text), statusMsg.firstChild);
+  statusSub.textContent=sub||'';
+  dot.className='dot'+(cls?(' '+cls):'');
+}
+let toastT;
+function toast(msg, warn){
+  toastEl.textContent=msg; toastEl.className='toast show'+(warn?' warn':'');
+  clearTimeout(toastT); toastT=setTimeout(()=>toastEl.className='toast'+(warn?' warn':''),1900);
+}
+
+/* ---------------- Client API (serveur + PostgreSQL) ---------------- */
+const api = {
+  async list(q, agence){
+    const p = new URLSearchParams();
+    if(q) p.set('q', q);
+    if(agence) p.set('agence', agence);
+    const r = await fetch('/api/scans' + (p.toString() ? ('?' + p.toString()) : ''));
+    if(!r.ok) throw new Error('list');
+    return r.json(); // { total, items:[{id,code,format,agence,scanned_at}] }
+  },
+  async add(rec){
+    const r = await fetch('/api/scans', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(rec)
+    });
+    if(!r.ok) throw new Error('add');
+    return r.json();
+  },
+  async update(id, code){
+    const r = await fetch('/api/scans/' + id, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({code})
+    });
+    if(!r.ok) throw new Error('update');
+    return r.json();
+  },
+  async del(id){
+    const r = await fetch('/api/scans/' + id, {method:'DELETE'});
+    if(!r.ok) throw new Error('del');
+  },
+  async clear(){
+    const r = await fetch('/api/scans', {method:'DELETE'});
+    if(!r.ok) throw new Error('clear');
+  }
+};
+function imageUrl(id){ return '/api/scans/' + id + '/image'; }
+function blobToDataURL(blob){
+  return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(blob); });
+}
+
+/* ---------------- Caméra ---------------- */
+async function listCameras(){
+  try{
+    const all=await navigator.mediaDevices.enumerateDevices();
+    S.devices=all.filter(d=>d.kind==='videoinput');
+  }catch(e){ S.devices=[]; }
+}
+
+async function startCamera(){
+  stopStream();
+  if(!window.isSecureContext){
+    setStatus('Caméra bloquée (page non sécurisée)', "Ouvre l'appli via une adresse https:// — pas en fichier local",'bad');
+    return false;
+  }
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setStatus('Caméra non supportée', "Utilise Chrome (Android) ou Safari (iPhone)",'bad');
+    return false;
+  }
+  const constraints={audio:false, video:
+    S.devices.length && S.devices[S.deviceIdx]?.deviceId
+      ? {deviceId:{exact:S.devices[S.deviceIdx].deviceId}}
+      : {facingMode:{ideal:'environment'}}
+  };
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia(constraints);
+    S.currentStream=stream; video.srcObject=stream;
+    await video.play().catch(()=>{});
+    if(!S.devices.length){ await listCameras(); }
+    return true;
+  }catch(e){
+    let sub="Réessaie";
+    if(e.name==='NotAllowedError') sub="Accès refusé — autorise la caméra dans les réglages du site";
+    else if(e.name==='NotFoundError') sub="Aucune caméra détectée sur l'appareil";
+    else if(e.name==='NotReadableError') sub="La caméra est déjà utilisée par une autre appli — ferme-la";
+    else if(e.name==='SecurityError') sub="Page non sécurisée — ouvre l'appli en https://";
+    setStatus('Caméra indisponible', sub, 'bad');
+    return false;
+  }
+}
+function stopStream(){
+  if(S.currentStream){S.currentStream.getTracks().forEach(t=>t.stop());S.currentStream=null;}
+}
+
+/* ---------------- Netteté (variance du Laplacien) ---------------- */
+const sCanvas=document.createElement('canvas'); const sCtx=sCanvas.getContext('2d',{willReadFrequently:true});
+function sharpness(){
+  const vw=video.videoWidth, vh=video.videoHeight;
+  if(!vw) return 0;
+  const w=240, h=Math.round(vh/vw*240);
+  sCanvas.width=w; sCanvas.height=h;
+  // on n'analyse que le centre (zone du cadre) pour coller à la cible
+  const cropW=vw*0.74, cropH=cropW*0.8, cx=(vw-cropW)/2, cy=(vh-cropH)/2;
+  sCtx.drawImage(video, cx,cy,cropW,cropH, 0,0,w,h);
+  const d=sCtx.getImageData(0,0,w,h).data;
+  const g=new Float32Array(w*h);
+  for(let i=0,p=0;i<d.length;i+=4,p++) g[p]=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+  let mean=0,n=0; const lap=new Float32Array(w*h);
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+    const o=y*w+x;
+    const v=4*g[o]-g[o-1]-g[o+1]-g[o-w]-g[o+w];
+    lap[o]=v; mean+=v; n++;
+  }
+  mean/=n; let varc=0;
+  for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const v=lap[y*w+x]-mean;varc+=v*v;}
+  return varc/n;
+}
+function updateSharpMeter(val){
+  const pct=Math.max(0,Math.min(100, Math.round(val/ (S.threshold*1.8) *100)));
+  sharpBar.style.width=pct+'%';
+  const ok=val>=S.threshold;
+  sharpBar.style.background=ok?'var(--scan)':'var(--warn)';
+  sharpPct.textContent=Math.round(val);
+  camWrap.classList.toggle('blurry', S.scanning && !ok);
+}
+let meterTimer;
+function meterLoop(){ if(S.scanning) updateSharpMeter(sharpness()); }
+
+/* ---------------- Capture ---------------- */
+const cap=document.createElement('canvas'); const capCtx=cap.getContext('2d');
+function grabPhoto(){
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const maxW=1280, scale=Math.min(1, maxW/vw);
+  cap.width=Math.round(vw*scale); cap.height=Math.round(vh*scale);
+  capCtx.drawImage(video,0,0,cap.width,cap.height);
+  return new Promise(res=>cap.toBlob(b=>res(b),'image/jpeg',0.82));
+}
+function beep(){
+  try{
+    const ac=new (window.AudioContext||window.webkitAudioContext)();
+    const o=ac.createOscillator(),g=ac.createGain();
+    o.frequency.value=880;o.connect(g);g.connect(ac.destination);
+    g.gain.setValueAtTime(.18,ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(.001,ac.currentTime+.14);
+    o.start();o.stop(ac.currentTime+.15);
+  }catch(e){}
+}
+function pad(n){return String(n).padStart(2,'0');}
+function stamp(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;}
+function safeName(code,d){return code.replace(/[^a-zA-Z0-9_-]/g,'_').slice(0,40)+'_'+d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'_'+pad(d.getHours())+pad(d.getMinutes())+pad(d.getSeconds())+'.jpg';}
+
+let busy=false;
+async function captureFor(code, fmt){
+  if(busy) return;
+  if(!S.agence){ setStatus('Choisis une agence', 'Sélectionne l\'agence en haut avant de scanner', 'warn'); return; }
+  busy=true;
+  setStatus('Enregistrement…', code + ' · ' + S.agence, 'ok');
+  try{
+    const blob=await grabPhoto();
+    const d=new Date();
+    const dataUrl=await blobToDataURL(blob);
+    await api.add({ code, format:fmt, agence:S.agence, image:dataUrl, scanned_at:d.toISOString() });
+    S.recent.set((S.agence||'')+'|'+code, Date.now());
+    // retour visuel
+    flash.classList.remove('go'); void flash.offsetWidth; flash.classList.add('go');
+    camWrap.classList.add('hit'); setTimeout(()=>camWrap.classList.remove('hit'),450);
+    if(S.sound){ beep(); if(navigator.vibrate) navigator.vibrate(60); }
+    if(S.autosave) downloadBlob(blob, safeName(code,d));
+    setStatus('Capturé ✓', code + ' · ' + S.agence, 'ok');
+    toast('Colis enregistré · ' + S.agence);
+    await refreshLog();
+  }catch(e){
+    setStatus('Échec enregistrement', 'Vérifie la connexion au serveur', 'bad');
+    toast('Erreur réseau — non enregistré', true);
+  }finally{
+    busy=false;
+  }
+}
+
+/* ---------------- Lecture ZXing ---------------- */
+let reader;
+function fmtName(f){
+  try{ return ZXing.BarcodeFormat[f] || (typeof f==='string'?f:'CODE'); }catch(e){ return 'CODE'; }
+}
+async function beginScan(){
+  if(!window.ZXing){ setStatus('Librairie non chargée','Vérifie ta connexion internet','bad'); return; }
+  const ok=await startCamera(); if(!ok) return;
+  if(!reader){
+    let hints;
+    try{
+      hints=new Map();
+      const F=ZXing.BarcodeFormat;
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[
+        F.CODE_128, F.CODE_39, F.ITF, F.EAN_13, F.EAN_8, F.UPC_A,
+        F.QR_CODE, F.DATA_MATRIX, F.PDF_417, F.CODE_93, F.CODABAR
+      ]);
+      hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    }catch(e){ hints=undefined; }
+    reader=new ZXing.BrowserMultiFormatReader(hints, {delayBetweenScanAttempts:120});
+  }
+  S.scanning=true;
+  $('startBtn').textContent='⏸ Arrêter le scan';
+  $('startBtn').classList.remove('primary');
+  setStatus('Recherche d\'un code…','Vise l\'étiquette du colis');
+  clearInterval(meterTimer); meterTimer=setInterval(meterLoop,180);
+
+  reader.decodeFromStream(S.currentStream, video, async (result, err)=>{
+    if(!S.scanning || !result) return;
+    const code=result.getText();
+    const fmt=fmtName(result.getBarcodeFormat());
+    const key=(S.agence||'')+'|'+code;
+    const last=S.recent.get(key);
+    if(last && (Date.now()-last)<S.dedupMs){
+      setStatus('Déjà scanné',code,'ok'); return;
+    }
+    const sh=sharpness();
+    if(!S.auto){ setStatus('Code détecté · capture manuelle off',code,'ok'); return; }
+    if(sh < S.threshold){
+      setStatus('Image floue — stabilise', code+' · netteté '+Math.round(sh)+'/'+S.threshold,'warn');
+      return; // on attend que ça devienne net (toujours en train de scanner)
+    }
+    await captureFor(code, fmt);
+  }).catch(e=>{
+    setStatus('Erreur lecture', e.message||'',  'bad');
+  });
+}
+function stopScan(){
+  S.scanning=false;
+  clearInterval(meterTimer);
+  try{ reader && reader.reset(); }catch(e){}
+  stopStream();
+  $('startBtn').textContent='▶︎ Démarrer le scan';
+  $('startBtn').classList.add('primary');
+  camWrap.classList.remove('blurry');
+  setStatus('Scan en pause','Appuie sur Démarrer pour reprendre');
+  sharpBar.style.width='0';sharpPct.textContent='—';
+}
+
+/* ---------------- Téléchargement ---------------- */
+function downloadBlob(blob, name){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+async function saveToGallery(item){
+  // récupère la photo depuis le serveur puis propose « Enregistrer l'image » (iOS/Android)
+  try{
+    const blob=await (await fetch(imageUrl(item.id))).blob();
+    const file=new File([blob], safeName(item.code,new Date(item.scanned_at)), {type:blob.type||'image/jpeg'});
+    if(navigator.canShare && navigator.canShare({files:[file]})){
+      try{ await navigator.share({files:[file], title:item.code}); return; }catch(e){ if(e.name==='AbortError') return; }
+    }
+    downloadBlob(blob, file.name);
+  }catch(e){ toast('Photo indisponible',true); }
+}
+
+/* ---------------- Rendu du journal ---------------- */
+let cache=[];          // éléments affichés (déjà filtrés côté serveur)
+let total=0;
+function fmtWhen(iso){
+  const d=new Date(iso);
+  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+let loadSeq=0;
+async function refreshLog(){
+  const q=$('search').value;
+  const ag=$('agencyFilter') ? $('agencyFilter').value : '';
+  const seq=++loadSeq;
+  try{
+    const data=await api.list(q.trim(), ag);
+    if(seq!==loadSeq) return;           // une recherche plus récente a pris le relais
+    cache=data.items||[]; total=data.total||0;
+    renderLog(q, ag);
+  }catch(e){
+    countEl.textContent='—';
+    emptyEl.style.display='block';
+    emptyEl.querySelector('h3').textContent='Serveur injoignable';
+    emptyEl.querySelector('p').textContent='Vérifie ta connexion puis recharge la page.';
+  }
+}
+function renderLog(rawQ, ag){
+  logEl.innerHTML='';
+  countEl.textContent=total;
+  emptyEl.style.display=cache.length?'none':'block';
+  if(!cache.length){
+    if((rawQ && rawQ.trim()) || ag){
+      emptyEl.querySelector('h3').textContent='Aucun résultat';
+      const crit=[rawQ&&rawQ.trim()?'« '+rawQ.trim()+' »':null, ag?('agence '+ag):null].filter(Boolean).join(' · ');
+      emptyEl.querySelector('p').textContent='Aucun colis pour '+crit+'.';
+    }else{
+      emptyEl.querySelector('h3').textContent='Aucun colis scanné';
+      emptyEl.querySelector('p').innerHTML="Va dans l'onglet Scanner et vise une étiquette.<br>Chaque code lu apparaît ici avec sa photo et l'heure.";
+    }
+  }
+  for(const e of cache){
+    const li=document.createElement('li'); li.className='entry';
+    li.innerHTML=`
+      <img src="${imageUrl(e.id)}" alt="" loading="lazy">
+      <div class="meta">
+        <div class="code">${escapeHtml(e.code)}</div>
+        <span class="fmt">${escapeHtml(e.format||'CODE')}</span>${e.agence?`<span class="ag">${escapeHtml(e.agence)}</span>`:''}
+        <div class="when">${fmtWhen(e.scanned_at)}</div>
+      </div>
+      <div class="row-actions">
+        <button class="iconbtn edit" title="Corriger le code">✎</button>
+        <button class="iconbtn save" title="Galerie">⤓</button>
+        <button class="iconbtn del" title="Supprimer">🗑</button>
+      </div>`;
+    li.querySelector('.edit').onclick=async()=>{
+      const v=prompt('Numéro du colis (celui imprimé sous le code-barres) :', e.code);
+      if(v!=null && v.trim()){ try{ await api.update(e.id, v.trim()); await refreshLog(); toast('Code mis à jour'); }catch(err){ toast('Échec mise à jour',true); } }
+    };
+    li.querySelector('.save').onclick=()=>saveToGallery(e);
+    li.querySelector('.del').onclick=async()=>{ try{ await api.del(e.id); await refreshLog(); }catch(err){ toast('Échec suppression',true); } };
+    logEl.appendChild(li);
+  }
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+/* ---------------- Exports ---------------- */
+function exportCsv(){ window.location.href='/api/export.csv'; }
+async function exportZip(){
+  if(!window.JSZip){toast('Module zip indisponible',true);return;}
+  // récupère toute la liste (sans filtre) puis chaque photo
+  let items;
+  try{ items=(await api.list('')).items; }catch(e){ toast('Serveur injoignable',true); return; }
+  if(!items.length){toast('Aucune photo',true);return;}
+  toast('Préparation du .zip…');
+  const zip=new JSZip();
+  let csv='\uFEFFCode;Format;Date;Heure\r\n';
+  for(const e of items){
+    try{
+      const blob=await (await fetch(imageUrl(e.id))).blob();
+      const d=new Date(e.scanned_at);
+      zip.file(safeName(e.code,d), blob);
+      csv+=`"${e.code}";"${e.format||''}";"${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}";"${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}"\r\n`;
+    }catch(err){ /* on saute une photo manquante */ }
+  }
+  zip.file('journal.csv',csv);
+  const blob=await zip.generateAsync({type:'blob'});
+  downloadBlob(blob,'colis_retours_'+Date.now()+'.zip');
+}
+
+/* ---------------- UI bindings ---------------- */
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active'); $('view-'+t.dataset.view).classList.add('active');
+  if(t.dataset.view==='log') refreshLog();
+});
+$('startBtn').onclick=()=>{ S.scanning?stopScan():beginScan(); };
+$('switchBtn').onclick=async()=>{
+  if(!S.devices.length) await listCameras();
+  if(S.devices.length<2){toast('Une seule caméra détectée',true);return;}
+  S.deviceIdx=(S.deviceIdx+1)%S.devices.length;
+  if(S.scanning){ try{reader.reset();}catch(e){} await beginScan(); }
+};
+$('thr').oninput=e=>{S.threshold=+e.target.value;$('thrVal').textContent=S.threshold;};
+function wireSwitch(id,key){const el=$(id);el.onclick=()=>{const on=!el.classList.contains('on');el.classList.toggle('on',on);el.setAttribute('aria-checked',on);S[key]=on;};}
+wireSwitch('swAuto','auto'); wireSwitch('swSound','sound'); wireSwitch('swSave','autosave');
+let searchT;
+$('search').oninput=()=>{ clearTimeout(searchT); searchT=setTimeout(refreshLog, 250); };
+$('exportCsv').onclick=exportCsv;
+$('exportZip').onclick=exportZip;
+$('clearAll').onclick=async()=>{ if(total && confirm('Supprimer TOUS les colis enregistrés sur le serveur ? Cette action est définitive.')){ try{ await api.clear(); await refreshLog(); toast('Journal vidé'); }catch(e){ toast('Échec',true); } } };
+
+/* ---------------- Agences ---------------- */
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function setAgence(name){
+  S.agence=name; lsSet('agence', name);
+  document.querySelectorAll('#agencyChips .chip').forEach(c=>c.classList.toggle('active', c.dataset.ag===name));
+  if(S.scanning) setStatus('Agence : '+name, 'Vise l\'étiquette du colis', 'ok');
+}
+function buildAgencies(){
+  // chips de scan
+  const wrap=$('agencyChips'); wrap.innerHTML='';
+  AGENCES.forEach(name=>{
+    const b=document.createElement('button');
+    b.className='chip'; b.dataset.ag=name; b.textContent=name;
+    b.onclick=()=>setAgence(name);
+    wrap.appendChild(b);
+  });
+  // filtre du journal
+  const sel=$('agencyFilter'); sel.innerHTML='';
+  const all=document.createElement('option'); all.value=''; all.textContent='Toutes les agences'; sel.appendChild(all);
+  AGENCES.forEach(name=>{ const o=document.createElement('option'); o.value=name; o.textContent=name; sel.appendChild(o); });
+  sel.onchange=refreshLog;
+  // restaure l'agence précédemment choisie (ou la première)
+  const saved=lsGet('agence');
+  setAgence(AGENCES.includes(saved)?saved:AGENCES[0]);
+}
+
+/* ---------------- Init ---------------- */
+(async function init(){
+  if(!window.isSecureContext){
+    setStatus('Page non sécurisée — caméra bloquée', "Ouvre cette appli via une adresse https:// (voir explications)",'bad');
+    const w=document.createElement('div');
+    w.style.cssText='margin:.9rem;padding:.9rem;border:1px solid var(--bad);border-radius:12px;background:#2a1414;font-size:.82rem;line-height:1.5';
+    w.innerHTML="<b style='color:var(--bad)'>⚠︎ La caméra ne peut pas démarrer ici</b><br>"+
+      "Tu as ouvert ce fichier en local (adresse <code>file://</code>). Le navigateur interdit la caméra hors HTTPS. "+
+      "Héberge le fichier sur une adresse <b>https://</b> puis ouvre ce lien sur ton téléphone.";
+    $('view-scan').insertBefore(w, $('view-scan').firstChild);
+    $('startBtn').textContent='⚠︎ HTTPS requis';
+  } else if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setStatus('Caméra non supportée',"Ouvre cette page dans Chrome ou Safari sur ton téléphone",'bad');
+  } else {
+    setStatus('Prêt','Appuie sur Démarrer le scan');
+  }
+  buildAgencies();
+  try{ await refreshLog(); }catch(e){ console.error(e); }
+  document.addEventListener('visibilitychange',()=>{ if(document.hidden && S.scanning) stopScan(); });
+})();
+</script>
+</body>
+</html>
